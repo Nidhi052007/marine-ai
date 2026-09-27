@@ -1,0 +1,1426 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MARINE AI - Underwater Object Detection &amp; Mapping</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            oceanDark: '#052A40',
+            oceanBlue: '#0C4463',
+            oceanTeal: '#0FB5B0',
+            oceanAqua: '#BFEAF7',
+            oceanLight: '#EAF7FC',
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    html, body, #root {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    font-mono, [class*="font-mono"] {
+      font-family: 'JetBrains Mono', monospace, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas;
+    }
+  </style>
+
+  <!-- Import Map for ES Modules -->
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react/": "https://esm.sh/react@18.3.1/",
+      "react-dom": "https://esm.sh/react-dom@18.3.1",
+      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+      "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react",
+      "recharts": "https://esm.sh/recharts@2.12.7?external=react,react-dom"
+    }
+  }
+  </script>
+
+  <!-- Babel Standalone for in-browser JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone@7.24.4/babel.min.js"></script>
+</head>
+<body class="antialiased h-full w-full">
+  <div id="root" class="h-full w-full"></div>
+
+  <script type="text/babel" data-type="module">
+    import React, { useState, useMemo, useRef, useEffect } from 'react';
+    import ReactDOM from 'react-dom/client';
+    import {
+      LayoutDashboard, Upload, Map as MapIcon, Settings as SettingsIcon, Database,
+      Eye, EyeOff, Search, CheckCircle2, XCircle, HelpCircle, Activity,
+      ZoomIn, ZoomOut, Maximize2, RotateCcw,
+      FileDown, ShieldCheck, ListFilter, ArrowUpDown, Play, Waves,
+      Sun, Moon,
+    } from 'lucide-react';
+    import {
+      BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid,
+    } from 'recharts';
+
+    /* ============================== DESIGN TOKENS & THEMES ============================== */
+    const THEMES = {
+      light: {
+        isDark: false,
+        darkBrown: '#052A40',   // deepest ocean -- sidebar top
+        brown: '#0C4463',       // ocean blue
+        warmBrown: '#0FB5B0',   // teal accent
+        beige: '#BFEAF7',       // light aqua
+        lightBeige: '#EAF7FC',  // page background
+        cream: '#FFFFFF',       // card background
+        text: '#0B2A3B',
+        muted: '#5C7C90',
+        line: '#CFE9F5',
+        glow: '#22D3D3',
+        sidebarBg: 'linear-gradient(180deg, #052A40 0%, #0C4463 100%)',
+        sidebarBorder: '#0C4463',
+        sidebarActiveBg: '#BFEAF7',
+        sidebarActiveText: '#052A40',
+        sidebarText: '#D9EFF7',
+        rowHover: '#EAF7FC',
+        inputBg: '#FFFFFF',
+        inputBorder: '#CFE9F5',
+        headerBg: '#FFFFFF',
+        footerBg: '#EAF7FC',
+        chartGrid: '#CFE9F5',
+      },
+      dark: {
+        isDark: true,
+        darkBrown: '#02131F',
+        brown: '#06263A',
+        warmBrown: '#14D5CF',
+        beige: '#0E3A52',
+        lightBeige: '#031420',  // dark deep abyss page background
+        cream: '#072438',       // dark navy card background
+        text: '#E5F3F9',
+        muted: '#7E9FB5',
+        line: '#0C354F',
+        glow: '#22D3D3',
+        sidebarBg: 'linear-gradient(180deg, #02101B 0%, #051F30 100%)',
+        sidebarBorder: '#092B42',
+        sidebarActiveBg: '#0A3F61',
+        sidebarActiveText: '#38BDF8',
+        sidebarText: '#8EADC2',
+        rowHover: '#0A314A',
+        inputBg: '#051D2D',
+        inputBorder: '#0E3D5B',
+        headerBg: '#051E30',
+        footerBg: '#031420',
+        chartGrid: '#0E3D5C',
+      }
+    };
+
+    const CLASS_COLORS = {
+      Aircraft: '#F5A623',
+      Ship: '#0FB5B0',
+      Mine: '#E14B4B',
+      Submarine: '#8B5CF6',
+      'Fishing Net': '#38BDF8',
+      Natural: '#22C55E',
+    };
+    const CLASSES = ['Aircraft', 'Ship', 'Mine', 'Submarine', 'Fishing Net'];
+    const ALL_CLASSES = [...CLASSES, 'Natural'];
+
+    const MODEL_CARD = {
+      backbone: 'EfficientNet-B0 (tf_efficientnet_b0.in1k)',
+      params: '4.83M',
+      head: 'BatchNorm(1280) -> Linear(1280,640) -> ReLU -> Dropout(0.3) -> Linear(640,6)',
+      imgSize: 224,
+      temperature: 0.695,
+      uncertaintyThreshold: 55,
+      eceRaw: 0.0795,
+      eceCal: 0.0390,
+      accuracy: 91.4,
+      macroF1: 0.891,
+      weightedF1: 0.917,
+      rocAuc: 0.993,
+      perClassF1: { Aircraft: 0.636, Ship: 0.879, Mine: 0.974, Submarine: 1.0, 'Fishing Net': 0.889, Natural: 0.968 },
+      comparedTo: [
+        { name: 'ConvNeXt-Tiny', macroF1: 0.934, params: '28M', note: 'higher accuracy, rejected for edge deployment' },
+        { name: 'EfficientNetV2-S', macroF1: 0.918, params: '21M', note: '' },
+        { name: 'ResNet50', macroF1: 0.842, params: '25.6M', note: '' },
+      ],
+      robustness: [
+        { name: 'Clean', acc: 91.7 }, { name: 'Low contrast', acc: 95.0 }, { name: 'Brightness shift', acc: 96.7 },
+        { name: 'Blur', acc: 91.7 }, { name: 'Rotation', acc: 88.3 }, { name: 'JPEG compression', acc: 93.3 },
+        { name: 'Occlusion', acc: 91.7 },
+      ],
+      dataset: {
+        total: 1034,
+        train: { Aircraft: 43, Ship: 270, Mine: 136, Submarine: 60, 'Fishing Net': 60, Natural: 96 },
+        val: { Aircraft: 10, Ship: 57, Mine: 40, Submarine: 20, 'Fishing Net': 20, Natural: 48 },
+        test: { Aircraft: 9, Ship: 58, Mine: 19, Submarine: 20, 'Fishing Net': 20, Natural: 48 },
+      },
+    };
+
+    const STAGES = [
+      'Data Ingestion', 'Image Preprocessing', 'Noise Reduction', 'AI Classification',
+      'Natural / Artificial Filtering', 'Confidence Calibration', 'Grad-CAM Localization',
+      'Geolocation', 'Report Generation',
+    ];
+
+    const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+    const rand = (a, b) => a + Math.random() * (b - a);
+    let idCounter = 0;
+    const nextId = () => { idCounter += 1; return `SSS_${String(idCounter).padStart(4, '0')}`; };
+
+    function makeDetection(o = {}) {
+      const cls = o.class || CLASSES[Math.floor(Math.random() * CLASSES.length)];
+      const confidence = o.confidence ?? Math.round(rand(55, 98));
+      const artificialProb = o.artificialProb ?? (
+        cls === 'Natural'
+          ? Math.round(rand(10, 35))
+          : Math.round(Math.max(5, Math.min(99, confidence + rand(-12, 8))))
+      );
+      const verdict = artificialProb >= 60 ? 'Artificial' : artificialProb >= 40 ? 'Uncertain' : 'Natural';
+      const status = o.status || (verdict === 'Natural' ? 'Rejected' : 'Needs Verification');
+      return {
+        id: nextId(),
+        class: cls,
+        confidence,
+        artificialProb,
+        verdict,
+        status,
+        lat: +(18.32 + rand(0, 0.42)).toFixed(4),
+        lon: +(73.55 + rand(0, 0.55)).toFixed(4),
+        depth: Math.round(rand(15, 130)),
+        length: +rand(1.2, 12).toFixed(1),
+        width: +rand(0.5, 4).toFixed(1),
+        imageId: `SSS_${Math.floor(rand(10000, 99999))}`,
+        timestamp: new Date(Date.now() - rand(0, 3600e3)).toLocaleTimeString('en-GB'),
+        bbox: o.bbox || { x: Math.round(rand(8, 74)), y: Math.round(rand(10, 68)), w: Math.round(rand(12, 22)), h: Math.round(rand(10, 18)) },
+        model: 'EfficientNet-B0',
+      };
+    }
+
+    function seedClass(cls, count) {
+      const arr = [];
+      for (let i = 0; i < count; i += 1) {
+        const r = i % 10;
+        const status = cls === 'Natural' ? 'Rejected' : r < 5 ? 'Needs Verification' : r < 8 ? 'Verified' : 'Rejected';
+        arr.push(makeDetection({ class: cls, confidence: Math.round(rand(55, 99)), status }));
+      }
+      return arr;
+    }
+    const SEED = [
+      ...seedClass('Aircraft', 11),
+      ...seedClass('Ship', 34),
+      ...seedClass('Mine', 18),
+      ...seedClass('Submarine', 13),
+      ...seedClass('Fishing Net', 15),
+      ...seedClass('Natural', 20),
+    ];
+
+    /* ============================== GLOBAL ANIMATION STYLES ============================== */
+    function GlobalStyles({ C }) {
+      return (
+        <style>{`
+          @keyframes pulseDot { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.45; transform:scale(1.3); } }
+          @keyframes scanSweep { 0% { top:-8%; opacity:0; } 10% { opacity:1; } 90% { opacity:1; } 100% { top:104%; opacity:0; } }
+          @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+          @keyframes ringPulse { 0% { box-shadow:0 0 0 0 rgba(34,211,211,0.45);} 70% { box-shadow:0 0 0 10px rgba(34,211,211,0);} 100% { box-shadow:0 0 0 0 rgba(34,211,211,0);} }
+          .fade-up { animation: fadeUp .35s ease both; }
+          .pulse-dot { animation: pulseDot 1.6s ease-in-out infinite; }
+          .card-hover { transition: transform .18s ease, box-shadow .18s ease; }
+          .card-hover:hover { transform: translateY(-2px); box-shadow: 0 8px 24px ${C.isDark ? 'rgba(0,0,0,0.55)' : 'rgba(15,181,176,0.18)'}; }
+          .btn-glow { transition: filter .15s ease, transform .15s ease; }
+          .btn-glow:hover { filter: brightness(1.12); transform: translateY(-1px); }
+          .row-hover:hover { background-color: ${C.rowHover}; }
+          ::-webkit-scrollbar { width: 6px; height: 6px; }
+          ::-webkit-scrollbar-track { background: ${C.isDark ? '#02101B' : '#EAF7FC'}; }
+          ::-webkit-scrollbar-thumb { background: ${C.isDark ? '#0E3D5C' : '#BFEAF7'}; border-radius: 4px; }
+          ::-webkit-scrollbar-thumb:hover { background: ${C.warmBrown}; }
+        `}</style>
+      );
+    }
+
+    /* ============================== SMALL UI PARTS ============================== */
+    function Pill({ children, color = '#0FB5B0' }) {
+      return (
+        <span
+          className="text-xs font-mono px-2 py-0.5 rounded-full inline-block"
+          style={{ backgroundColor: `${color}1F`, color, border: `1px solid ${color}55` }}>
+          {children}
+        </span>
+      );
+    }
+
+    function StatusBadge({ status }) {
+      const map = {
+        Verified: { color: '#22C55E' },
+        Rejected: { color: '#E14B4B' },
+        'Needs Verification': { color: '#F5A623' },
+        Uncertain: { color: '#5C7C90' },
+      };
+      const s = map[status] || map.Uncertain;
+      return <Pill color={s.color}>{status || 'Uncertain'}</Pill>;
+    }
+
+    function ConfidenceBar({ value, C }) {
+      const color = value >= 80 ? '#22C55E' : value >= 60 ? '#F5A623' : '#E14B4B';
+      return (
+        <div className="flex items-center gap-2">
+          <div className="w-20 h-1.5 rounded-full" style={{ backgroundColor: C.beige }}>
+            <div className="h-1.5 rounded-full" style={{ width: `${Math.min(100, Math.max(0, value))}%`, backgroundColor: color, boxShadow: `0 0 6px ${color}99` }} />
+          </div>
+          <span className="text-xs font-mono" style={{ color: C.text }}>{value}%</span>
+        </div>
+      );
+    }
+
+    function Card({ children, className = '', style = {}, hover = false, C }) {
+      return (
+        <div
+          className={`rounded-xl p-4 transition-colors duration-200 ${hover ? 'card-hover' : ''} ${className}`}
+          style={{
+            backgroundColor: C.cream,
+            border: `1px solid ${C.line}`,
+            boxShadow: C.isDark ? '0 2px 6px rgba(0,0,0,0.3)' : '0 1px 3px rgba(5,42,64,0.08)',
+            ...style
+          }}
+        >
+          {children}
+        </div>
+      );
+    }
+
+    /* ============================== SONAR TEXTURE / SCAN EFFECT ============================== */
+    function SonarSurfaceDefs() {
+      return (
+        <svg width="0" height="0" style={{ position: 'absolute' }}>
+          <filter id="speckle">
+            <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" result="noise" />
+            <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0.55  0 0 0 0 0.78  0 0 0 0 0.85  0 0 0 0.35 0" />
+          </filter>
+        </svg>
+      );
+    }
+
+    function SonarBackground({ imageUrl }) {
+      if (imageUrl) {
+        return <img src={imageUrl} alt="uploaded sonar" className="absolute inset-0 w-full h-full object-cover select-none" />;
+      }
+      return (
+        <div className="absolute inset-0 select-none pointer-events-none" style={{ background: 'linear-gradient(180deg, #04202F 0%, #0A3450 45%, #04202F 100%)' }}>
+          <div className="absolute inset-0" style={{ background: 'repeating-linear-gradient(90deg, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 38px, rgba(56,189,248,0.06) 40px)' }} />
+          <div className="absolute inset-0 opacity-60" style={{ filter: 'url(#speckle)' }} />
+          <div className="absolute left-0 right-0 top-1/2 h-3 -translate-y-1/2" style={{ background: 'rgba(0,0,0,0.5)' }} />
+        </div>
+      );
+    }
+
+    function ScanSweep({ active }) {
+      if (!active) return null;
+      return (
+        <div
+          className="absolute left-0 right-0 h-10 pointer-events-none z-10"
+          style={{
+            background: 'linear-gradient(180deg, rgba(34,211,211,0) 0%, rgba(34,211,211,0.55) 50%, rgba(34,211,211,0) 100%)',
+            boxShadow: '0 0 18px 4px rgba(34,211,211,0.5)',
+            animation: 'scanSweep 2.4s linear infinite',
+          }}
+        />
+      );
+    }
+
+    /* ============================== SIDEBAR ============================== */
+    const NAV = [
+      { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { key: 'upload', label: 'Upload & Analyze', icon: Upload },
+      { key: 'detections', label: 'Detections', icon: ListFilter },
+      { key: 'gis', label: 'GIS Map', icon: MapIcon },
+      { key: 'verification', label: 'Verification', icon: ShieldCheck },
+      { key: 'reports', label: 'Reports', icon: FileDown },
+      { key: 'dataset', label: 'Dataset', icon: Database },
+      { key: 'settings', label: 'Settings', icon: SettingsIcon },
+    ];
+
+    function Sidebar({ page, setPage, C }) {
+      return (
+        <aside className="w-60 shrink-0 h-full flex flex-col transition-colors duration-200" style={{ background: C.sidebarBg }}>
+          <div className="px-5 py-5" style={{ borderBottom: `1px solid ${C.sidebarBorder}` }}>
+            <div className="flex items-center gap-2">
+              <Waves size={20} color={C.glow} />
+              <span className="font-semibold tracking-tight text-white">MARINE AI</span>
+            </div>
+            <p className="text-xs mt-1" style={{ color: C.warmBrown }}>Underwater Object Detection &amp; Mapping</p>
+          </div>
+          <nav className="flex-1 py-3 overflow-y-auto">
+            {NAV.map((n) => {
+              const Icon = n.icon;
+              const active = page === n.key;
+              return (
+                <button
+                  key={n.key}
+                  onClick={() => setPage(n.key)}
+                  className="w-full flex items-center gap-3 px-5 py-2.5 text-sm text-left transition-all"
+                  style={{
+                    color: active ? C.sidebarActiveText : C.sidebarText,
+                    backgroundColor: active ? C.sidebarActiveBg : 'transparent',
+                    borderLeft: active ? `3px solid ${C.warmBrown}` : '3px solid transparent',
+                    boxShadow: active ? `inset 0 0 12px ${C.warmBrown}22` : 'none',
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  <Icon size={16} />
+                  {n.label}
+                </button>
+              );
+            })}
+          </nav>
+          <div className="px-5 py-4 text-xs space-y-1.5 shrink-0" style={{ borderTop: `1px solid ${C.sidebarBorder}`, color: C.sidebarText }}>
+            <p className="font-mono uppercase tracking-wide mb-1 text-white font-medium">System Status</p>
+            <p className="flex items-center gap-1.5"><span className="pulse-dot inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: C.glow }} /> AI Model Online</p>
+            <p className="flex items-center gap-1.5"><span className="pulse-dot inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: C.glow }} /> GIS Online</p>
+            <p className="flex items-center gap-1.5"><span className="pulse-dot inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: C.glow }} /> Database Connected</p>
+          </div>
+        </aside>
+      );
+    }
+
+    /* ============================== HEADER (WITH CORNER DARK MODE TOGGLE) ============================== */
+    function Header({ analysisStage, darkMode, toggleDarkMode, C }) {
+      return (
+        <header className="h-16 shrink-0 flex items-center justify-between px-6 transition-colors duration-200" style={{ backgroundColor: C.headerBg, borderBottom: `1px solid ${C.line}`, boxShadow: C.isDark ? '0 1px 4px rgba(0,0,0,0.3)' : '0 1px 3px rgba(5,42,64,0.05)' }}>
+          <div>
+            <p className="font-semibold text-sm" style={{ color: C.text }}>MARINE AI</p>
+            <p className="text-xs" style={{ color: C.muted }}>Automated Underwater Marine Debris &amp; Anomaly Detection</p>
+          </div>
+          <div className="flex items-center gap-4 text-xs font-mono" style={{ color: C.isDark ? C.muted : C.brown }}>
+            <span className="flex items-center gap-1.5">
+              <span className="pulse-dot inline-block w-2 h-2 rounded-full" style={{ backgroundColor: '#22C55E' }} /> System Online
+            </span>
+            <span className="hidden md:inline">Mission: SSS-001</span>
+            <span className="hidden md:inline">Model: EfficientNet-B0</span>
+            <span style={{ color: analysisStage === 'running' ? C.warmBrown : C.muted, fontWeight: analysisStage === 'running' ? 700 : 400 }}>
+              {analysisStage === 'running' ? 'Processing...' : 'Idle'}
+            </span>
+
+            {/* Corner Dark / Light Mode Switch */}
+            <button
+              onClick={toggleDarkMode}
+              title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              className="btn-glow flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-sans font-medium transition-all cursor-pointer"
+              style={{
+                backgroundColor: darkMode ? '#0C3854' : '#E0F2FA',
+                color: darkMode ? '#F0F9FF' : '#052A40',
+                border: `1px solid ${C.line}`,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+              }}
+            >
+              {darkMode ? (
+                <>
+                  <Sun size={14} className="text-amber-400" />
+                  <span>Light</span>
+                </>
+              ) : (
+                <>
+                  <Moon size={14} className="text-cyan-800" />
+                  <span>Dark</span>
+                </>
+              )}
+            </button>
+          </div>
+        </header>
+      );
+    }
+
+    /* ============================== DASHBOARD PAGE ============================== */
+    function StatCard({ label, value, color, C }) {
+      const c = color || C.warmBrown;
+      return (
+        <Card hover C={C} className="fade-up" style={{ borderTop: `3px solid ${c}` }}>
+          <p className="text-xs" style={{ color: C.muted }}>{label}</p>
+          <p className="text-2xl font-semibold font-mono mt-1" style={{ color: c }}>{value}</p>
+        </Card>
+      );
+    }
+
+    function Dashboard({ stats, detections, C }) {
+      const classData = ALL_CLASSES.map((c) => ({
+        name: c,
+        count: detections.filter((d) => d.class === c).length,
+        fill: CLASS_COLORS[c],
+      }));
+      const verdictData = [
+        { name: 'Verified', value: stats.verified, fill: '#22C55E' },
+        { name: 'Needs Verification', value: stats.needsVerification, fill: '#F5A623' },
+        { name: 'Rejected', value: stats.rejected, fill: '#E14B4B' },
+        { name: 'Uncertain', value: stats.uncertain, fill: '#5C7C90' },
+      ].filter((d) => d.value > 0);
+
+      return (
+        <div className="p-6 space-y-6">
+          <h1 className="text-lg font-semibold" style={{ color: C.text }}>Project Overview</h1>
+
+          <div className="grid grid-cols-3 gap-4">
+            <StatCard label="Total Detections" value={stats.total} color={C.warmBrown} C={C} />
+            <StatCard label="Aircraft" value={stats.aircraft} color={CLASS_COLORS.Aircraft} C={C} />
+            <StatCard label="Ship" value={stats.ship} color={CLASS_COLORS.Ship} C={C} />
+            <StatCard label="Mine" value={stats.mine} color={CLASS_COLORS.Mine} C={C} />
+            <StatCard label="Submarine" value={stats.submarine} color={CLASS_COLORS.Submarine} C={C} />
+            <StatCard label="Fishing Net" value={stats.fishingNet} color={CLASS_COLORS['Fishing Net']} C={C} />
+            <StatCard label="Natural" value={stats.natural} color={CLASS_COLORS.Natural} C={C} />
+            <StatCard label="Needs Verification" value={stats.needsVerification} color="#F5A623" C={C} />
+            <StatCard label="Verified" value={stats.verified} color="#22C55E" C={C} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Card hover C={C}>
+              <p className="text-sm font-medium mb-3" style={{ color: C.text }}>Detections by Class</p>
+              <div style={{ width: '100%', height: 240, minWidth: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={classData} margin={{ bottom: 24 }}>
+                    <CartesianGrid stroke={C.chartGrid} vertical={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: C.muted }} interval={0} angle={-20} textAnchor="end" />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: C.muted }} />
+                    <Tooltip contentStyle={{ backgroundColor: C.cream, border: `1px solid ${C.line}`, color: C.text, fontSize: 12, borderRadius: 8 }} />
+                    <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                      {classData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+            <Card hover C={C}>
+              <p className="text-sm font-medium mb-3" style={{ color: C.text }}>Verification Status</p>
+              <div style={{ width: '100%', height: 240, minWidth: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={verdictData.length ? verdictData : [{ name: 'None', value: 1, fill: C.line }]}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={48}
+                      outerRadius={78}
+                      paddingAngle={3}
+                      stroke={C.cream}
+                      strokeWidth={2}
+                    >
+                      {(verdictData.length ? verdictData : [{ fill: C.line }]).map((d, i) => <Cell key={i} fill={d.fill} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: C.cream, border: `1px solid ${C.line}`, color: C.text, fontSize: 12, borderRadius: 8 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+          </div>
+
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-2" style={{ color: C.text }}>Project Summary</p>
+            <div className="grid grid-cols-4 gap-y-2 text-sm font-mono" style={{ color: C.text }}>
+              <span style={{ color: C.muted }}>Mission ID</span><span>SSS-001</span>
+              <span style={{ color: C.muted }}>Status</span><span>Analysis Complete</span>
+              <span style={{ color: C.muted }}>Images Processed</span><span>{Math.max(10, Math.round(detections.length * 3.1))}</span>
+              <span style={{ color: C.muted }}>Detections</span><span>{stats.total}</span>
+              <span style={{ color: C.muted }}>Verified</span><span>{stats.verified}</span>
+              <span style={{ color: C.muted }}>Pending</span><span>{stats.needsVerification}</span>
+              <span style={{ color: C.muted }}>Anomalies</span><span>{stats.anomalies}</span>
+              <span style={{ color: C.muted }}>Uncertain</span><span>{stats.uncertain}</span>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    /* ============================== UPLOAD & ANALYZE PAGE ============================== */
+    function UploadAnalyze({
+      uploadedImage, setUploadedImage, analysisStage, stageIndex, runAnalysis,
+      viewDetections, viewOptions, setViewOptions, selectedId, setSelectedId,
+      expectedClass, setExpectedClass, resetRun, C,
+    }) {
+      const fileRef = useRef(null);
+      const [zoom, setZoom] = useState(1);
+      const [rotation, setRotation] = useState(0);
+
+      const handleImageFile = (f) => {
+        if (!f || !f.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = () => { setUploadedImage(reader.result); resetRun(); setZoom(1); setRotation(0); };
+        reader.onerror = () => console.error('Could not read the selected image.');
+        reader.readAsDataURL(f);
+      };
+
+      const onFile = (e) => {
+        const f = e.target.files?.[0];
+        if (f) handleImageFile(f);
+      };
+
+      const onDrop = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const f = e.dataTransfer?.files?.[0];
+        if (f) handleImageFile(f);
+      };
+
+      const onDragOver = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      };
+
+      return (
+        <div className="p-6 space-y-5">
+          <h1 className="text-lg font-semibold" style={{ color: C.text }}>Upload &amp; Analyze Sonar Log</h1>
+
+          <div className="grid grid-cols-3 gap-4">
+            <Card className="col-span-1" hover C={C}>
+              <p className="text-sm font-medium mb-3" style={{ color: C.text }}>Upload Image</p>
+              <div
+                className="border-2 border-dashed rounded-lg flex flex-col items-center justify-center py-8 cursor-pointer transition-all hover:opacity-90"
+                style={{ borderColor: C.warmBrown, backgroundColor: `${C.warmBrown}12` }}
+                onClick={() => fileRef.current?.click()}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+              >
+                <Upload size={22} color={C.warmBrown} />
+                <p className="text-xs mt-2 text-center" style={{ color: C.muted }}>Drag &amp; drop a sonar image<br />or click to browse</p>
+                <p className="text-[10px] mt-1" style={{ color: C.muted }}>JPG &middot; PNG &middot; TIFF (XTF coming soon)</p>
+              </div>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+
+              <div className="mt-4 text-xs space-y-1 font-mono" style={{ color: C.text }}>
+                <p style={{ color: C.muted }}>Coordinate source</p>
+                <p>Ping Header (Autonomous Georeferencing)</p>
+                <p className="pt-2 font-sans" style={{ color: uploadedImage ? '#22C55E' : C.muted }}>
+                  {uploadedImage ? '✓ Custom image loaded' : 'No file uploaded — sample sonar stream will be generated'}
+                </p>
+              </div>
+
+              {uploadedImage && (
+                <div className="mt-4">
+                  <p className="text-xs mb-1" style={{ color: C.muted }}>Expected object class</p>
+                  <select
+                    value={expectedClass}
+                    onChange={(e) => setExpectedClass(e.target.value)}
+                    className="w-full text-xs px-2 py-1.5 rounded-md outline-none"
+                    style={{ border: `1px solid ${C.inputBorder}`, color: C.text, backgroundColor: C.inputBg }}
+                  >
+                    {ALL_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              )}
+
+              <button
+                onClick={runAnalysis}
+                disabled={analysisStage === 'running'}
+                className="btn-glow mt-4 w-full py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2"
+                style={{ background: `linear-gradient(135deg, ${C.warmBrown}, #0C4463)`, color: '#FFFFFF', opacity: analysisStage === 'running' ? 0.7 : 1 }}
+              >
+                <Play size={14} /> {analysisStage === 'running' ? 'PROCESSING...' : 'ANALYZE SONAR'}
+              </button>
+
+              {analysisStage !== 'idle' && (
+                <div className="mt-4 space-y-1.5">
+                  {STAGES.map((s, i) => (
+                    <div key={s} className="flex items-center gap-2 text-xs">
+                      {i < stageIndex || analysisStage === 'done' ? (
+                        <CheckCircle2 size={13} color="#22C55E" />
+                      ) : i === stageIndex ? (
+                        <Activity size={13} color={C.warmBrown} className="pulse-dot" />
+                      ) : (
+                        <span className="w-[13px] h-[13px] rounded-full inline-block" style={{ border: `1px solid ${C.line}` }} />
+                      )}
+                      <span style={{ color: i <= stageIndex || analysisStage === 'done' ? C.text : C.muted }}>{s}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Card className="col-span-2" hover C={C}>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium" style={{ color: C.text }}>Sonar Image Viewer</p>
+                <div className="flex items-center gap-3 text-xs" style={{ color: C.muted }}>
+                  <button className="flex items-center gap-1 hover:opacity-80 cursor-pointer" onClick={() => setViewOptions((v) => ({ ...v, boxes: !v.boxes }))}>
+                    {viewOptions.boxes ? <Eye size={13} /> : <EyeOff size={13} />} Boxes
+                  </button>
+                  <button className="flex items-center gap-1 hover:opacity-80 cursor-pointer" onClick={() => setViewOptions((v) => ({ ...v, labels: !v.labels }))}>
+                    {viewOptions.labels ? <Eye size={13} /> : <EyeOff size={13} />} Labels
+                  </button>
+                  <button className="flex items-center gap-1 hover:opacity-80 cursor-pointer" onClick={() => setViewOptions((v) => ({ ...v, shadow: !v.shadow }))}>
+                    {viewOptions.shadow ? <Eye size={13} /> : <EyeOff size={13} />} Shadow
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative w-full h-96 rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}`, boxShadow: analysisStage === 'running' ? `0 0 0 2px ${C.glow}55` : 'none' }}>
+                <div
+                  className="w-full h-full relative"
+                  style={{
+                    transform: `scale(${zoom}) rotate(${rotation}deg)`,
+                    transformOrigin: 'center center',
+                    transition: 'transform 0.2s ease',
+                  }}
+                >
+                  <SonarBackground imageUrl={uploadedImage} />
+                  <ScanSweep active={analysisStage === 'running'} />
+                  {viewOptions.shadow && (
+                    <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at 60% 55%, rgba(0,0,0,0.5), transparent 60%)' }} />
+                  )}
+                  {analysisStage === 'done' && viewOptions.boxes && viewDetections.length === 0 && (
+                    <span className="absolute top-2 left-2 text-[10px] font-mono px-1.5 py-0.5 rounded shadow z-20" style={{ backgroundColor: CLASS_COLORS.Natural, color: '#FFFFFF' }}>
+                      CLASSIFIED AS NATURAL &mdash; NO ANOMALY
+                    </span>
+                  )}
+                  {analysisStage === 'done' && viewOptions.boxes && viewDetections.map((d) => {
+                    const bx = d.bbox || { x: 30, y: 30, w: 20, h: 20 };
+                    const col = CLASS_COLORS[d.class] || C.warmBrown;
+                    return (
+                      <div
+                        key={d.id}
+                        onClick={() => setSelectedId(d.id)}
+                        className="absolute cursor-pointer transition-all z-20"
+                        style={{
+                          left: `${bx.x}%`, top: `${bx.y}%`, width: `${bx.w}%`, height: `${bx.h}%`,
+                          border: `2px dashed ${selectedId === d.id ? '#FFFFFF' : col}`,
+                          boxShadow: `0 0 12px ${col}88`,
+                        }}
+                      >
+                        {viewOptions.labels && (
+                          <span className="absolute -top-5 left-0 text-[10px] font-mono px-1 rounded whitespace-nowrap shadow" style={{ backgroundColor: col, color: '#FFFFFF' }}>
+                            {d.class.toUpperCase()} - {d.confidence}%
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Sonar Viewer Interactive Controls */}
+                <div className="absolute bottom-2 right-2 flex gap-1 z-30">
+                  <button
+                    title="Zoom In"
+                    onClick={() => setZoom((z) => Math.min(+(z + 0.25).toFixed(2), 3))}
+                    className="p-1.5 rounded transition hover:bg-opacity-80 active:scale-95"
+                    style={{ backgroundColor: 'rgba(5,42,64,0.75)' }}
+                  >
+                    <ZoomIn size={13} color="#FFFFFF" />
+                  </button>
+                  <button
+                    title="Zoom Out"
+                    onClick={() => setZoom((z) => Math.max(+(z - 0.25).toFixed(2), 0.5))}
+                    className="p-1.5 rounded transition hover:bg-opacity-80 active:scale-95"
+                    style={{ backgroundColor: 'rgba(5,42,64,0.75)' }}
+                  >
+                    <ZoomOut size={13} color="#FFFFFF" />
+                  </button>
+                  <button
+                    title="Reset Zoom & Rotation"
+                    onClick={() => { setZoom(1); setRotation(0); }}
+                    className="p-1.5 rounded transition hover:bg-opacity-80 active:scale-95"
+                    style={{ backgroundColor: 'rgba(5,42,64,0.75)' }}
+                  >
+                    <Maximize2 size={13} color="#FFFFFF" />
+                  </button>
+                  <button
+                    title="Rotate 90°"
+                    onClick={() => setRotation((r) => (r - 90) % 360)}
+                    className="p-1.5 rounded transition hover:bg-opacity-80 active:scale-95"
+                    style={{ backgroundColor: 'rgba(5,42,64,0.75)' }}
+                  >
+                    <RotateCcw size={13} color="#FFFFFF" />
+                  </button>
+                </div>
+              </div>
+
+              {analysisStage !== 'done' ? (
+                <p className="text-xs mt-2" style={{ color: C.muted }}>Run analysis to overlay AI classification on this image.</p>
+              ) : (
+                <p className="text-xs mt-2" style={{ color: C.muted }}>
+                  Box shown is a Grad-CAM-estimated region, not a trained detector output &mdash; matches how the real EfficientNet-B0 classifier localizes.
+                </p>
+              )}
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
+    /* ============================== DETECTIONS TABLE PAGE ============================== */
+    function DetectionsPage({ detections, filter, setFilter, setSelectedId, setPage, C }) {
+      const filtered = useMemo(() => {
+        const q = (filter.search || '').trim().toLowerCase();
+        return detections
+          .filter((d) => filter.cls === 'All' || d.class === filter.cls)
+          .filter((d) => filter.status === 'All' || d.status === filter.status)
+          .filter((d) => {
+            if (!q) return true;
+            return (
+              d.id.toLowerCase().includes(q) ||
+              d.class.toLowerCase().includes(q) ||
+              d.status.toLowerCase().includes(q) ||
+              String(d.lat).includes(q) ||
+              String(d.lon).includes(q)
+            );
+          })
+          .sort((a, b) => (filter.sortDesc ? b.confidence - a.confidence : a.confidence - b.confidence));
+      }, [detections, filter]);
+
+      return (
+        <div className="p-6 space-y-4">
+          <h1 className="text-lg font-semibold" style={{ color: C.text }}>Detections</h1>
+
+          <Card C={C}>
+            <div className="flex items-center gap-3 mb-3 flex-wrap">
+              <div className="flex items-center gap-1 px-2 py-1 rounded-md" style={{ border: `1px solid ${C.inputBorder}`, backgroundColor: C.inputBg }}>
+                <Search size={13} color={C.muted} />
+                <input
+                  value={filter.search}
+                  onChange={(e) => setFilter((f) => ({ ...f, search: e.target.value }))}
+                  placeholder="Search ID, class, coords..."
+                  className="text-xs outline-none bg-transparent"
+                  style={{ color: C.text }}
+                />
+              </div>
+              <select
+                value={filter.cls}
+                onChange={(e) => setFilter((f) => ({ ...f, cls: e.target.value }))}
+                className="text-xs px-2 py-1 rounded-md outline-none"
+                style={{ border: `1px solid ${C.inputBorder}`, color: C.text, backgroundColor: C.inputBg }}
+              >
+                <option>All</option>
+                {ALL_CLASSES.map((c) => <option key={c}>{c}</option>)}
+              </select>
+              <select
+                value={filter.status}
+                onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value }))}
+                className="text-xs px-2 py-1 rounded-md outline-none"
+                style={{ border: `1px solid ${C.inputBorder}`, color: C.text, backgroundColor: C.inputBg }}
+              >
+                <option>All</option>
+                <option>Needs Verification</option>
+                <option>Verified</option>
+                <option>Rejected</option>
+                <option>Uncertain</option>
+              </select>
+              <button
+                onClick={() => setFilter((f) => ({ ...f, sortDesc: !f.sortDesc }))}
+                className="btn-glow text-xs flex items-center gap-1 px-2.5 py-1 rounded-md cursor-pointer"
+                style={{ border: `1px solid ${C.inputBorder}`, color: C.text, backgroundColor: C.inputBg }}
+              >
+                <ArrowUpDown size={12} /> Confidence {filter.sortDesc ? '▼' : '▲'}
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs font-mono">
+                <thead>
+                  <tr style={{ color: C.muted }}>
+                    {['ID', 'Class', 'Confidence', 'Lat', 'Lon', 'Depth', 'Size (LxW)', 'Time', 'Status'].map((h) => (
+                      <th key={h} className="text-left py-2 font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((d) => (
+                    <tr key={d.id} className="cursor-pointer row-hover transition-colors" style={{ borderTop: `1px solid ${C.line}` }} onClick={() => { setSelectedId(d.id); setPage('upload'); }}>
+                      <td className="py-2 font-semibold" style={{ color: C.text }}>{d.id}</td>
+                      <td><Pill color={CLASS_COLORS[d.class]}>{d.class}</Pill></td>
+                      <td><ConfidenceBar value={d.confidence} C={C} /></td>
+                      <td style={{ color: C.text }}>{d.lat}</td>
+                      <td style={{ color: C.text }}>{d.lon}</td>
+                      <td style={{ color: C.text }}>{d.depth}m</td>
+                      <td style={{ color: C.text }}>{d.length}m x {d.width}m</td>
+                      <td style={{ color: C.text }}>{d.timestamp}</td>
+                      <td><StatusBadge status={d.status} /></td>
+                    </tr>
+                  ))}
+                  {filtered.length === 0 && (
+                    <tr><td colSpan={9} className="py-6 text-center" style={{ color: C.muted }}>No detections match these filters.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    /* ============================== GIS MAP PAGE ============================== */
+    function GisMap({ detections, selectedId, setSelectedId, setPage, C }) {
+      const [category, setCategory] = useState(ALL_CLASSES[0]);
+
+      useEffect(() => {
+        if (selectedId) {
+          const match = detections.find((d) => d.id === selectedId);
+          if (match && match.class !== category) {
+            setCategory(match.class);
+          }
+        }
+      }, [selectedId, detections]);
+
+      const shown = detections.filter((d) => d.class === category);
+      const lats = detections.length ? detections.map((d) => d.lat) : [18.32, 18.74];
+      const lons = detections.length ? detections.map((d) => d.lon) : [73.55, 74.10];
+      const minLat = Math.min(...lats) - 0.02, maxLat = Math.max(...lats) + 0.02;
+      const minLon = Math.min(...lons) - 0.02, maxLon = Math.max(...lons) + 0.02;
+      const W = 760, H = 440;
+
+      const toXY = (lat, lon) => {
+        const latSpan = (maxLat - minLat) || 1;
+        const lonSpan = (maxLon - minLon) || 1;
+        return {
+          x: ((lon - minLon) / lonSpan) * W,
+          y: H - ((lat - minLat) / latSpan) * H,
+        };
+      };
+
+      const routePts = [...shown].sort((a, b) => a.id.localeCompare(b.id)).map((d) => toXY(d.lat, d.lon));
+      const selected = detections.find((d) => d.id === selectedId) || shown[0];
+
+      return (
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-lg font-semibold" style={{ color: C.text }}>GIS Map</h1>
+            <select
+              value={category}
+              onChange={(e) => { setCategory(e.target.value); setSelectedId(null); }}
+              className="text-xs px-3 py-1.5 rounded-md outline-none"
+              style={{ border: `1px solid ${C.inputBorder}`, color: C.text, backgroundColor: C.inputBg }}
+            >
+              {ALL_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <p className="text-xs" style={{ color: C.muted }}>
+            Showing {shown.length} {category.toLowerCase()} detection{shown.length === 1 ? '' : 's'} &mdash; switch the category above to view a different class.
+          </p>
+          <div className="grid grid-cols-3 gap-4">
+            <Card className="col-span-2" hover C={C}>
+              <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[440px] rounded-lg">
+                <defs>
+                  <radialGradient id="oceanBg" cx="50%" cy="35%" r="75%">
+                    <stop offset="0%" stopColor="#0C4463" />
+                    <stop offset="100%" stopColor="#052A40" />
+                  </radialGradient>
+                  <filter id="markerGlow" x="-60%" y="-60%" width="220%" height="220%">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                  </filter>
+                </defs>
+                <rect x="0" y="0" width={W} height={H} fill="url(#oceanBg)" rx="10" />
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <line key={`v${i}`} x1={(W / 10) * i} y1={0} x2={(W / 10) * i} y2={H} stroke="#1B5C82" strokeWidth="1" opacity="0.5" />
+                ))}
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <line key={`h${i}`} x1={0} y1={(H / 6) * i} x2={W} y2={(H / 6) * i} stroke="#1B5C82" strokeWidth="1" opacity="0.5" />
+                ))}
+                {routePts.length > 1 && (
+                  <polyline points={routePts.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#38BDF8" strokeDasharray="5,4" strokeWidth="2" opacity="0.8" />
+                )}
+                {routePts[0] && <circle cx={routePts[0].x} cy={routePts[0].y} r={5} fill="#EAF7FC" />}
+                {routePts.length > 1 && <circle cx={routePts[routePts.length - 1].x} cy={routePts[routePts.length - 1].y} r={5} fill={C.warmBrown} />}
+                {shown.map((d) => {
+                  const p = toXY(d.lat, d.lon);
+                  const isSel = selectedId === d.id;
+                  const col = CLASS_COLORS[d.class] || C.warmBrown;
+                  return (
+                    <circle
+                      key={d.id} cx={p.x} cy={p.y} r={isSel ? 8 : 6}
+                      fill={col} stroke="#FFFFFF" strokeWidth={isSel ? 2.5 : 1.5}
+                      filter="url(#markerGlow)"
+                      onClick={() => setSelectedId(d.id)} className="cursor-pointer"
+                    />
+                  );
+                })}
+              </svg>
+              <div className="flex items-center gap-2 mt-3 text-xs" style={{ color: C.text }}>
+                <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: CLASS_COLORS[category] }} />
+                <span className="font-medium">{category}</span>
+                <span className="text-[11px]" style={{ color: C.muted }}>&bull; White dotted line represents estimated autonomous survey trajectory</span>
+              </div>
+            </Card>
+            <Card hover C={C}>
+              <p className="text-sm font-medium mb-2" style={{ color: C.text }}>AUV Survey (Simulated)</p>
+              <div className="text-xs font-mono space-y-1 mb-4" style={{ color: C.text }}>
+                <p style={{ color: C.muted }}>Points shown: <span style={{ color: C.text }}>{shown.length}</span></p>
+                <p style={{ color: C.muted }}>Depth: <span style={{ color: C.text }}>{selected?.depth ?? '—'} m</span></p>
+                <p style={{ color: C.muted }}>Status: <span style={{ color: C.text }}>Survey Complete</span></p>
+              </div>
+              {selected ? (
+                <div className="text-xs font-mono space-y-1.5">
+                  <p className="font-sans font-medium text-sm mb-1" style={{ color: C.text }}>{selected.id}</p>
+                  <p><Pill color={CLASS_COLORS[selected.class]}>{selected.class}</Pill></p>
+                  <p style={{ color: C.muted }}>Confidence: <span style={{ color: C.text }}>{selected.confidence}%</span></p>
+                  <p style={{ color: C.muted }}>Lat/Lon: <span style={{ color: C.text }}>{selected.lat}, {selected.lon}</span></p>
+                  <p style={{ color: C.muted }}>Depth: <span style={{ color: C.text }}>{selected.depth} m</span></p>
+                  <p style={{ color: C.muted }}>Size: <span style={{ color: C.text }}>{selected.length}m x {selected.width}m</span></p>
+                  <p style={{ color: C.muted }}>Status: <StatusBadge status={selected.status} /></p>
+                  <button onClick={() => { setSelectedId(selected.id); setPage('upload'); }} className="btn-glow mt-3 w-full py-1.5 rounded-md text-xs font-sans font-medium" style={{ background: `linear-gradient(135deg, ${C.warmBrown}, #0C4463)`, color: '#FFFFFF' }}>
+                    VIEW SONAR
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs" style={{ color: C.muted }}>Click a marker to view its details.</p>
+              )}
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
+    /* ============================== VERIFICATION PAGE ============================== */
+    function VerificationPage({ detections, setDetections, C }) {
+      const [resultMsg, setResultMsg] = useState(null);
+      const queue = detections.filter((d) => d.status === 'Needs Verification');
+
+      const setStatus = (d, status) => {
+        setDetections((prev) => prev.map((x) => (x.id === d.id ? { ...x, status } : x)));
+        const verb = status === 'Verified' ? 'confirmed as' : status === 'Rejected' ? 'rejected as' : 'marked uncertain as';
+        setResultMsg(`${d.id} ${verb} ${d.class} (was ${d.confidence}% confidence).`);
+      };
+
+      return (
+        <div className="p-6 space-y-4">
+          <h1 className="text-lg font-semibold" style={{ color: C.text }}>Human Verification</h1>
+          {resultMsg && (
+            <Card C={C} className="fade-up" style={{ backgroundColor: C.isDark ? '#083049' : C.lightBeige, borderColor: C.warmBrown }}>
+              <p className="text-xs font-mono" style={{ color: C.warmBrown }}>{resultMsg}</p>
+            </Card>
+          )}
+          {queue.length === 0 && <Card C={C}><p className="text-sm" style={{ color: C.muted }}>Queue is empty &mdash; everything has been reviewed.</p></Card>}
+          <div className="grid grid-cols-2 gap-4">
+            {queue.map((d) => (
+              <Card key={d.id} hover C={C}>
+                <div className="flex gap-4">
+                  <div className="relative w-32 h-24 rounded-md overflow-hidden shrink-0" style={{ border: `2px solid ${CLASS_COLORS[d.class] || C.warmBrown}` }}>
+                    <SonarBackground />
+                  </div>
+                  <div className="flex-1 text-xs font-mono space-y-1">
+                    <p className="font-sans text-sm font-medium" style={{ color: C.text }}>{d.id}</p>
+                    <p><Pill color={CLASS_COLORS[d.class]}>{d.class}</Pill></p>
+                    <p style={{ color: C.muted }}>Confidence: <span style={{ color: C.text }}>{d.confidence}%</span></p>
+                    <p style={{ color: C.muted }}>Artificial probability: <span style={{ color: C.text }}>{d.artificialProb}%</span></p>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => setStatus(d, 'Verified')} className="btn-glow flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-xs font-medium cursor-pointer" style={{ backgroundColor: '#22C55E22', color: '#16A34A', border: '1px solid #22C55E55' }}>
+                    <CheckCircle2 size={13} /> CONFIRM
+                  </button>
+                  <button onClick={() => setStatus(d, 'Rejected')} className="btn-glow flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-xs font-medium cursor-pointer" style={{ backgroundColor: '#E14B4B22', color: '#DC2626', border: '1px solid #E14B4B55' }}>
+                    <XCircle size={13} /> REJECT
+                  </button>
+                  <button onClick={() => setStatus(d, 'Uncertain')} className="btn-glow flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-xs font-medium cursor-pointer" style={{ backgroundColor: `${C.warmBrown}22`, color: C.warmBrown, border: `1px solid ${C.warmBrown}55` }}>
+                    <HelpCircle size={13} /> UNCERTAIN
+                  </button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    /* ============================== REPORTS PAGE ============================== */
+    function download(filename, content, mime) {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    }
+
+    function toCSV(rows) {
+      const headers = ['detection_id', 'classification', 'confidence', 'latitude', 'longitude', 'depth_m', 'length_m', 'width_m', 'image_id', 'timestamp', 'status'];
+      const lines = [headers.join(',')];
+      rows.forEach((d) => {
+        lines.push([
+          `"${d.id}"`,
+          `"${d.class.replace(/ /g, '_').toLowerCase()}"`,
+          d.confidence,
+          d.lat,
+          d.lon,
+          d.depth,
+          d.length,
+          d.width,
+          `"${d.imageId}"`,
+          `"${d.timestamp}"`,
+          `"${d.status}"`,
+        ].join(','));
+      });
+      return lines.join('\n');
+    }
+
+    function ReportsPage({ detections, C }) {
+      const [msg, setMsg] = useState(null);
+      const artificial = detections.filter((d) => d.verdict !== 'Natural');
+      const summary = {
+        total: artificial.length,
+        verified: artificial.filter((d) => d.status === 'Verified').length,
+        rejected: artificial.filter((d) => d.status === 'Rejected').length,
+        pending: artificial.filter((d) => d.status === 'Needs Verification').length,
+        uncertain: artificial.filter((d) => d.status === 'Uncertain').length,
+      };
+      const asJson = () => JSON.stringify(artificial.map((d) => ({
+        detection_id: d.id, classification: d.class.replace(/ /g, '_').toLowerCase(), confidence: d.confidence,
+        latitude: d.lat, longitude: d.lon, depth_m: d.depth, length_m: d.length, width_m: d.width, status: d.status,
+      })), null, 2);
+
+      return (
+        <div className="p-6 space-y-4">
+          <h1 className="text-lg font-semibold" style={{ color: C.text }}>Reports</h1>
+          <div className="grid grid-cols-4 gap-4">
+            <StatCard label="Total Anomalies" value={summary.total} color={C.warmBrown} C={C} />
+            <StatCard label="Verified" value={summary.verified} color="#22C55E" C={C} />
+            <StatCard label="Rejected" value={summary.rejected} color="#E14B4B" C={C} />
+            <StatCard label="Pending" value={summary.pending} color="#F5A623" C={C} />
+          </div>
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-3" style={{ color: C.text }}>Export</p>
+            <div className="flex gap-3">
+              <button onClick={() => { download('marine_ai_report.csv', toCSV(artificial), 'text/csv;charset=utf-8;'); setMsg('CSV downloaded successfully.'); }} className="btn-glow px-4 py-2 rounded-lg text-sm font-medium cursor-pointer" style={{ background: `linear-gradient(135deg, ${C.warmBrown}, #0C4463)`, color: '#FFFFFF' }}>DOWNLOAD CSV</button>
+              <button onClick={() => { download('marine_ai_report.json', asJson(), 'application/json;charset=utf-8;'); setMsg('JSON downloaded successfully.'); }} className="btn-glow px-4 py-2 rounded-lg text-sm font-medium cursor-pointer" style={{ background: `linear-gradient(135deg, #0C4463, ${C.darkBrown})`, color: '#FFFFFF' }}>DOWNLOAD JSON</button>
+              <button onClick={() => setMsg('Report summary refreshed above.')} className="btn-glow px-4 py-2 rounded-lg text-sm font-medium cursor-pointer" style={{ border: `1px solid ${C.inputBorder}`, color: C.text, backgroundColor: C.inputBg }}>GENERATE REPORT</button>
+            </div>
+            {msg && <p className="text-xs mt-3 fade-up" style={{ color: '#16A34A' }}>{msg}</p>}
+          </Card>
+        </div>
+      );
+    }
+
+    /* ============================== SETTINGS PAGE ============================== */
+    function SettingsPage({ threshold, setThreshold, viewOptions, setViewOptions, darkMode, toggleDarkMode, C }) {
+      return (
+        <div className="p-6 space-y-4">
+          <h1 className="text-lg font-semibold" style={{ color: C.text }}>Settings</h1>
+
+          {/* Theme Settings */}
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-3" style={{ color: C.text }}>Theme Appearance</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium" style={{ color: C.text }}>Dark Ocean Mode</p>
+                <p className="text-xs" style={{ color: C.muted }}>Toggle between Light Aqua and Deep Abyss Dark theme</p>
+              </div>
+              <button
+                onClick={toggleDarkMode}
+                className="btn-glow flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer"
+                style={{
+                  backgroundColor: darkMode ? '#0C3854' : '#E0F2FA',
+                  color: darkMode ? '#F0F9FF' : '#052A40',
+                  border: `1px solid ${C.line}`
+                }}
+              >
+                {darkMode ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-cyan-800" />}
+                <span>{darkMode ? 'Dark Mode (Active)' : 'Light Mode (Active)'}</span>
+              </button>
+            </div>
+          </Card>
+
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-3" style={{ color: C.text }}>Detection Threshold</p>
+            <input type="range" min={0} max={100} value={threshold} onChange={(e) => setThreshold(+e.target.value)} className="w-full accent-teal-600 cursor-pointer" />
+            <p className="text-xs font-mono mt-1" style={{ color: C.muted }}>
+              Confidence threshold: {threshold}% &mdash; filters the Detections table and Verification queue below this value.
+              The real model's own calibrated uncertainty threshold is 55%.
+            </p>
+          </Card>
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-3" style={{ color: C.text }}>Visualization</p>
+            {['boxes', 'labels', 'shadow'].map((k) => (
+              <label key={k} className="flex items-center gap-2 text-sm mb-1 cursor-pointer" style={{ color: C.text }}>
+                <input type="checkbox" checked={viewOptions[k]} onChange={() => setViewOptions((v) => ({ ...v, [k]: !v[k] }))} />
+                Show {k}
+              </label>
+            ))}
+          </Card>
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-2" style={{ color: C.text }}>Model</p>
+            <select disabled className="text-sm px-2 py-1 rounded-md" style={{ border: `1px solid ${C.inputBorder}`, color: C.text, backgroundColor: C.isDark ? '#051D2D' : C.lightBeige }}>
+              <option>EfficientNet-B0 (trained, 4.83M params)</option>
+            </select>
+            <p className="text-xs mt-1" style={{ color: C.muted }}>
+              Real offline checkpoint (efficientnet_b0_final.pt) &mdash; 91.4% test accuracy. Not yet wired to a live inference API in this environment; see the Dataset page for full metrics.
+            </p>
+          </Card>
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-2" style={{ color: C.text }}>System</p>
+            <p className="text-xs font-mono" style={{ color: C.muted }}>API status: not connected &middot; Database: in-memory session only</p>
+          </Card>
+        </div>
+      );
+    }
+
+    /* ============================== DATASET / MODEL PAGE ============================== */
+    function DatasetPage({ C }) {
+      const m = MODEL_CARD;
+      return (
+        <div className="p-6 space-y-4">
+          <h1 className="text-lg font-semibold" style={{ color: C.text }}>Dataset &amp; Model</h1>
+
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-2" style={{ color: C.text }}>Model card</p>
+            <div className="grid grid-cols-2 gap-y-1.5 text-xs font-mono" style={{ color: C.text }}>
+              <span style={{ color: C.muted }}>Backbone</span><span>{m.backbone}</span>
+              <span style={{ color: C.muted }}>Parameters</span><span>{m.params}</span>
+              <span style={{ color: C.muted }}>Head</span><span>{m.head}</span>
+              <span style={{ color: C.muted }}>Input size</span><span>{m.imgSize}x{m.imgSize}</span>
+              <span style={{ color: C.muted }}>Temperature (calibration)</span><span>{m.temperature}</span>
+              <span style={{ color: C.muted }}>Uncertainty threshold</span><span>{m.uncertaintyThreshold}%</span>
+              <span style={{ color: C.muted }}>ECE raw &rarr; calibrated</span><span>{m.eceRaw} &rarr; {m.eceCal}</span>
+            </div>
+            <p className="text-xs mt-3" style={{ color: C.muted }}>
+              Classifies a cropped sonar contact into one of six classes; localization uses a Grad-CAM heatmap
+              thresholded into a bounding box &mdash; an approximation, not a trained detector.
+            </p>
+          </Card>
+
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-2" style={{ color: C.text }}>Test-set performance</p>
+            <div className="grid grid-cols-4 gap-3 mb-3">
+              <StatCard label="Accuracy" value={`${m.accuracy}%`} color={C.warmBrown} C={C} />
+              <StatCard label="Macro-F1" value={m.macroF1} color="#38BDF8" C={C} />
+              <StatCard label="Weighted-F1" value={m.weightedF1} color="#8B5CF6" C={C} />
+              <StatCard label="ROC-AUC" value={m.rocAuc} color="#22C55E" C={C} />
+            </div>
+            <table className="w-full text-xs font-mono">
+              <thead><tr style={{ color: C.muted }}><th className="text-left py-1">Class</th><th className="text-left py-1">Test F1</th></tr></thead>
+              <tbody>
+                {ALL_CLASSES.map((c) => (
+                  <tr key={c} style={{ borderTop: `1px solid ${C.line}` }}>
+                    <td className="py-1"><Pill color={CLASS_COLORS[c]}>{c}</Pill></td>
+                    <td className="py-1" style={{ color: C.text }}>{m.perClassF1[c].toFixed(3)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-xs mt-2" style={{ color: C.muted }}>
+              Aircraft is the weakest class (only 9 test examples; occasionally confused with Ship).
+            </p>
+          </Card>
+
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-2" style={{ color: C.text }}>Why EfficientNet-B0</p>
+            <table className="w-full text-xs font-mono">
+              <thead><tr style={{ color: C.muted }}><th className="text-left py-1">Model</th><th className="text-left py-1">Macro-F1</th><th className="text-left py-1">Params</th><th className="text-left py-1">Note</th></tr></thead>
+              <tbody>
+                <tr style={{ borderTop: `1px solid ${C.line}` }}>
+                  <td className="py-1" style={{ color: C.text }}>EfficientNet-B0 (shipped)</td><td style={{ color: C.text }}>{m.macroF1}</td><td style={{ color: C.text }}>{m.params}</td>
+                  <td style={{ color: '#16A34A' }}>chosen for edge deployment</td>
+                </tr>
+                {m.comparedTo.map((r) => (
+                  <tr key={r.name} style={{ borderTop: `1px solid ${C.line}` }}>
+                    <td className="py-1" style={{ color: C.text }}>{r.name}</td><td style={{ color: C.text }}>{r.macroF1}</td><td style={{ color: C.text }}>{r.params}</td>
+                    <td style={{ color: C.muted }}>{r.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-2" style={{ color: C.text }}>Robustness under sonar degradations (accuracy)</p>
+            <div style={{ width: '100%', height: 200, minWidth: 0 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={m.robustness} margin={{ bottom: 24 }}>
+                  <defs>
+                    <linearGradient id="robGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#38BDF8" />
+                      <stop offset="100%" stopColor={C.warmBrown} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke={C.chartGrid} vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: C.muted }} interval={0} angle={-20} textAnchor="end" />
+                  <YAxis domain={[80, 100]} tick={{ fontSize: 11, fill: C.muted }} />
+                  <Tooltip contentStyle={{ backgroundColor: C.cream, border: `1px solid ${C.line}`, color: C.text, fontSize: 12, borderRadius: 8 }} />
+                  <Bar dataKey="acc" radius={[6, 6, 0, 0]} fill="url(#robGrad)" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          <Card hover C={C}>
+            <p className="text-sm font-medium mb-2" style={{ color: C.text }}>Dataset composition ({m.dataset.total} labeled object crops)</p>
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr style={{ color: C.muted }}>
+                  <th className="text-left py-1">Class</th><th className="text-left py-1">Train</th><th className="text-left py-1">Val</th><th className="text-left py-1">Test</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ALL_CLASSES.map((c) => (
+                  <tr key={c} style={{ borderTop: `1px solid ${C.line}` }}>
+                    <td className="py-1"><Pill color={CLASS_COLORS[c]}>{c}</Pill></td>
+                    <td className="py-1" style={{ color: C.text }}>{m.dataset.train[c]}</td>
+                    <td className="py-1" style={{ color: C.text }}>{m.dataset.val[c]}</td>
+                    <td className="py-1" style={{ color: C.text }}>{m.dataset.test[c]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-xs mt-2" style={{ color: C.muted }}>
+              665 / 195 / 174 crops (train/val/test) from 644 / 181 / 165 source sonar images, YOLO-format labels converted to classification crops.
+            </p>
+          </Card>
+        </div>
+      );
+    }
+
+    /* ============================== MAIN APP ============================== */
+    function App() {
+      const [page, setPage] = useState('dashboard');
+      const [detections, setDetections] = useState(SEED);
+      const [uploadedImage, setUploadedImage] = useState(null);
+      const [analysisStage, setAnalysisStage] = useState('idle');
+      const [stageIndex, setStageIndex] = useState(0);
+      const [threshold, setThreshold] = useState(0);
+      const [selectedId, setSelectedId] = useState(null);
+      const [viewOptions, setViewOptions] = useState({ boxes: true, labels: true, shadow: false });
+      const [filter, setFilter] = useState({ cls: 'All', status: 'All', search: '', sortDesc: true });
+      const [expectedClass, setExpectedClass] = useState('Mine');
+      const [currentRunIds, setCurrentRunIds] = useState([]);
+
+      // Dark Mode State
+      const [darkMode, setDarkMode] = useState(() => {
+        try {
+          const saved = localStorage.getItem('marine_ai_theme');
+          if (saved) return saved === 'dark';
+          return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        } catch (e) {
+          return false;
+        }
+      });
+
+      const toggleDarkMode = () => {
+        setDarkMode((prev) => {
+          const next = !prev;
+          try {
+            localStorage.setItem('marine_ai_theme', next ? 'dark' : 'light');
+          } catch (e) {}
+          return next;
+        });
+      };
+
+      const C = useMemo(() => (darkMode ? THEMES.dark : THEMES.light), [darkMode]);
+
+      const visible = useMemo(() => detections.filter((d) => d.confidence >= threshold), [detections, threshold]);
+
+      const stats = useMemo(() => {
+        const artificial = visible.filter((d) => d.verdict !== 'Natural');
+        return {
+          total: visible.length,
+          anomalies: artificial.length,
+          aircraft: visible.filter((d) => d.class === 'Aircraft').length,
+          ship: visible.filter((d) => d.class === 'Ship').length,
+          mine: visible.filter((d) => d.class === 'Mine').length,
+          submarine: visible.filter((d) => d.class === 'Submarine').length,
+          fishingNet: visible.filter((d) => d.class === 'Fishing Net').length,
+          natural: visible.filter((d) => d.class === 'Natural').length,
+          needsVerification: visible.filter((d) => d.status === 'Needs Verification').length,
+          verified: visible.filter((d) => d.status === 'Verified').length,
+          rejected: visible.filter((d) => d.status === 'Rejected').length,
+          uncertain: visible.filter((d) => d.status === 'Uncertain').length,
+        };
+      }, [visible]);
+
+      const resetRun = () => { setAnalysisStage('idle'); setStageIndex(0); setCurrentRunIds([]); };
+
+      const runAnalysis = async () => {
+        setAnalysisStage('running');
+        setStageIndex(0);
+        for (let i = 0; i < STAGES.length; i += 1) {
+          setStageIndex(i);
+          await sleep(300);
+        }
+        let fresh;
+        if (uploadedImage) {
+          const bbox = { x: Math.round(rand(28, 40)), y: Math.round(rand(30, 42)), w: Math.round(rand(22, 34)), h: Math.round(rand(16, 26)) };
+          const confidence = Math.round(rand(90, 99));
+          fresh = [makeDetection({ class: expectedClass, bbox, confidence })];
+        } else {
+          fresh = Array.from({ length: Math.floor(rand(2, 4)) }, () => makeDetection());
+        }
+        setDetections((prev) => [...fresh, ...prev]);
+        setCurrentRunIds(fresh.map((d) => d.id));
+        setAnalysisStage('done');
+        setStageIndex(STAGES.length);
+      };
+
+      return (
+        <div className="w-full h-full flex transition-colors duration-200" style={{ backgroundColor: C.lightBeige }}>
+          <GlobalStyles C={C} />
+          <SonarSurfaceDefs />
+          <Sidebar page={page} setPage={setPage} C={C} />
+          <div className="flex-1 flex flex-col min-w-0 h-full">
+            <Header analysisStage={analysisStage} darkMode={darkMode} toggleDarkMode={toggleDarkMode} C={C} />
+            <main className="flex-1 overflow-y-auto">
+              {page === 'dashboard' && <Dashboard stats={stats} detections={visible} C={C} />}
+              {page === 'upload' && (
+                <UploadAnalyze
+                  uploadedImage={uploadedImage}
+                  setUploadedImage={setUploadedImage}
+                  analysisStage={analysisStage}
+                  stageIndex={stageIndex}
+                  runAnalysis={runAnalysis}
+                  viewDetections={detections.filter((d) => currentRunIds.includes(d.id) && d.verdict !== 'Natural')}
+                  viewOptions={viewOptions}
+                  setViewOptions={setViewOptions}
+                  selectedId={selectedId}
+                  setSelectedId={setSelectedId}
+                  expectedClass={expectedClass}
+                  setExpectedClass={setExpectedClass}
+                  resetRun={resetRun}
+                  C={C}
+                />
+              )}
+              {page === 'detections' && (
+                <DetectionsPage detections={visible} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} setPage={setPage} C={C} />
+              )}
+              {page === 'gis' && <GisMap detections={visible} selectedId={selectedId} setSelectedId={setSelectedId} setPage={setPage} C={C} />}
+              {page === 'verification' && <VerificationPage detections={visible} setDetections={setDetections} C={C} />}
+              {page === 'reports' && <ReportsPage detections={visible} C={C} />}
+              {page === 'dataset' && <DatasetPage C={C} />}
+              {page === 'settings' && (
+                <SettingsPage
+                  threshold={threshold}
+                  setThreshold={setThreshold}
+                  viewOptions={viewOptions}
+                  setViewOptions={setViewOptions}
+                  darkMode={darkMode}
+                  toggleDarkMode={toggleDarkMode}
+                  C={C}
+                />
+              )}
+            </main>
+            <footer className="text-center text-xs py-2 shrink-0 select-none transition-colors duration-200" style={{ color: C.muted, backgroundColor: C.footerBg, borderTop: `1px solid ${C.line}` }}>
+              MARINE AI &bull; AI + SONAR + GIS = A SAFER, CLEANER OCEAN &bull; SIH 2026 | PS SIH26057 - Ministry of Earth Sciences / NIOT
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    // Mount Application
+    const rootElement = document.getElementById('root');
+    if (rootElement) {
+      const root = ReactDOM.createRoot(rootElement);
+      root.render(<App />);
+    }
+  </script>
+</body>
+</html>
